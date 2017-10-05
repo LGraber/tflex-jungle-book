@@ -1,0 +1,323 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Jungle Book</title>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+        <!-- JQuery -->
+        <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+
+        <!-- Bootstrap -->
+        <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" >
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" ></script>
+        
+        <!-- Extension -->
+        <script src="./tableau-addin-0.5.0.js"></script>
+    </head>
+    
+    <style>
+        polygon.filter {
+            stroke: black;
+            fill: white;
+            fill-opacity: 0;
+            stroke-width: 1;
+        }
+
+        polygon.filter:hover, #settings-gear:hover {
+            cursor: pointer;
+        }
+
+        polygon.hidden-filter {
+            stroke-opacity: 0;
+        }
+
+        polyline.outline {
+            fill: none;
+            stroke: black;
+            stroke-width: 1;
+        }
+
+        .btn-no-focus:focus {
+            outline: none;
+            box-shadow: none;
+        }
+    </style>
+
+    <script type="text/javascript">
+        var gFilterList;
+
+        function $$(elementId) {
+            return document.getElementById(elementId);
+        }
+
+        function removeShape(shapeId) {
+            var shape = $$(shapeId);
+            if (null != shape) {
+                $$('mysvg').removeChild(shape);
+            }
+        }
+
+        function createShapeStart(x, y) {
+            var c = document.createElementNS("http://www.w3.org/2000/svg", 'circle')
+            c.id = "shapeStart";
+            c.setAttribute('cx', x);
+            c.setAttribute('cy', y);
+            c.setAttribute('r', 2);
+            c.style.fill = "red";
+            $$('mysvg').appendChild(c);
+        }
+
+        function createTempPolyLine(x, y) {
+            var tempShape = document.createElementNS("http://www.w3.org/2000/svg", 'polyline');
+            tempShape.id = "tempShape";
+            tempShape.classList.add("outline");
+            tempShape.setAttribute('points', x + "," + y);
+            $$('mysvg').appendChild(tempShape);
+            return tempShape;
+        }
+
+        function showPopup(str){
+            let worksheetIndex = $$('sheet-name').selectedIndex;
+            tableau.addIn.dashboardContent.dashboard.worksheets[worksheetIndex].applyFilterAsync(
+                gFilterList[$$('field-name').selectedIndex].fieldName,
+                [str],
+                tableau.FilterUpdateType.Replace,
+                {'isExcludeMode': false}
+            ).then( (fieldName) => {
+                alert('Applied filter to ' + fieldName + ' value ' + str);
+            }, (err) => {
+                alert(" What " + err.toString());
+            } );
+            
+        }
+
+        function createSavedPolygon(points) {
+            var shape = document.createElementNS("http://www.w3.org/2000/svg", 'polygon');
+            shape.classList.add("filter");
+            shape.setAttribute('points', points);
+            shape.setAttribute('title', $$('field-domain').value);
+            shape.setAttribute('onclick', "showPopup('" + $$('field-domain').value + "');");
+            $$('mysvg').appendChild(shape);
+            
+        }
+
+        function saveShape(e) {
+            var tempShape = $$('tempShape');
+            if (null != tempShape) {
+                createSavedPolygon(tempShape.getAttribute('points'));
+                $$('mysvg').removeChild(tempShape);
+            }
+            $$('mysvg').removeChild($$('shapeStart'));
+            // No need to listen anymore until they start the next shape
+            $$("selectionDiv").removeEventListener('contextmenu', completeShape);
+            $('#fieldModal').modal('hide');
+        }
+
+        function completeShape(e) {
+            e.preventDefault();
+            $('#fieldModal').modal('show');
+            return false;
+        }
+
+        function addVertex(e) {
+            var shapeStart = $$('shapeStart');
+            if (null == shapeStart) {
+                createShapeStart(e.pageX, e.pageY);
+                $$("selectionDiv").addEventListener('contextmenu', completeShape);
+            } else {
+                var tempShape = $$('tempShape');
+                if (null == tempShape) {
+                    tempShape = createTempPolyLine(shapeStart.getAttribute('cx'), shapeStart.getAttribute('cy'));
+                }
+                // Add the next point
+                var points = tempShape.getAttribute('points');
+                points += " " + e.pageX + "," + e.pageY;
+                tempShape.setAttribute('points', points);
+            }
+        }
+
+        function deleteVertex() {
+            var tempShape = $$('tempShape');
+            if (null != tempShape) {
+                var points = tempShape.getAttribute('points');
+                // Remove the last point
+                points = points.substring(0, points.lastIndexOf(" "));
+                if (-1 == points.indexOf(" ")) {
+                    // If there is only one point left, remove the temp shape
+                    $$('mysvg').removeChild(tempShape);
+                } else {
+                    tempShape.setAttribute('points', points);
+                }
+            } else {
+                removeShape('shapeStart');
+            }
+        }
+
+        function onBodyLoad() {
+            $$("selectionDiv").addEventListener('click', addVertex);
+            
+            tableau.addIn.initializeAsync().then( function() {
+
+                    let allSheets = tableau.addIn.dashboardContent.dashboard.worksheets;
+                    for (var sheet of allSheets) {
+                        let opt = document.createElement('option');
+                        opt.value = opt.text = sheet.name;
+                        $$('sheet-name').appendChild(opt);
+                    }
+                    $$('sheet-name').addEventListener('change', updateFilterFields);
+                    // Populate the initial set of filter fields;
+                    updateFilterFields();
+
+                }, function(err) {
+
+                    // something went wrong in initialization
+                    alert("Error while Initializing: " + err.toString());
+                });
+        }
+
+        function updateFilterFields() {
+            let worksheetIndex = $$('sheet-name').selectedIndex;
+            tableau.addIn.dashboardContent.dashboard.worksheets[worksheetIndex].getFiltersAsync().then( 
+                function(filters) {
+                    $$('field-name').removeEventListener('change', updateFieldDomain);
+                    for(const filter of filters) {
+                        let opt = document.createElement('option');
+                        opt.value = opt.text = filter.fieldName;
+                        $$('field-name').appendChild(opt);
+                    }
+                    gFilterList = filters;
+                    $$('field-name').addEventListener('change', updateFieldDomain);
+                    // Populate the initial fieldDomain
+                    updateFieldDomain();
+                }, function(err) {
+                    alert("Something went wrong" + err.toString());
+                });
+        }
+
+        function updateFieldDomain() {
+            let filterIndex = $$('field-name').selectedIndex ;
+            gFilterList[filterIndex].getDomainAsync().then(
+                function(domain) {
+                    for(const val of domain.values) {
+                        console.log(val.value);
+                        let opt= document.createElement('option');
+                        opt.value = opt.text = val.value;
+                        $$('field-domain').appendChild(opt);
+                    }
+                }
+            )
+        }
+        
+        function onImageUpdate() {
+            $$('mappedImage').src = $$("image-url").value;
+        }
+
+        function saveSettings() {
+            onImageUpdate();
+            $('#settingsModal').modal('hide');
+        }
+
+        function settingsClicked() {
+            let hidden = $$('edit-buttons').classList.toggle('hidden');
+            if (!hidden) {
+                $$('selectionDiv').style.display = "block";
+                // hide all of the shapes
+                var polygons = $$('mysvg').children;
+                for (var i=0; i<polygons.length; ++i) {
+                    polygons[i].classList.remove('hidden-filter');
+                }
+            } else {
+                $$('selectionDiv').style.display = "none";
+                // Delete the start and temp shapes if they exist
+                removeShape('shapeStart');
+                removeShape('tempShape');
+                // hide all of the shapes
+                var polygons = $$('mysvg').children;
+                for (var i=0; i<polygons.length; ++i) {
+                    polygons[i].classList.add('hidden-filter');
+                }
+            }
+        }
+
+    </script>
+    <body onload="onBodyLoad();">
+        <img id="mappedImage" style="object-fit: cover; width:100%; height:100%; position:absolute; left:0; top:0"/>
+        <svg id="mysvg" style="width:100%; height:100%; position:absolute; left:0; top:0"></svg>
+        <div id="selectionDiv" style="display:none; width:100%; height:100%; position:absolute; left:0; top:0;"></div>
+        <div id="configDiv" class="row" style="position:absolute; bottom:0; right:0; margin:8">
+            <div class="input-group input-group-sm">
+                <span id="edit-buttons" class="hidden">
+                    <button id="deleteVertex" title="Delete Vertex" type="button" class="btn btn-default btn-sm btn-no-focus" onclick="deleteVertex();">
+                        <span class="glyphicon glyphicon-step-backward"></span>
+                    </button>
+                    <button id="erase-all" title="Erase All Polygons" type="button" class="btn btn-default btn-sm btn-no-focus">
+                        <span class="glyphicon glyphicon-erase"></span>
+                    </button>
+                    <button id="saveSelection" title="Save" type="button" class="btn btn-default btn-sm btn-no-focus" data-toggle="modal" data-target="#settingsModal">
+                        <span class="glyphicon glyphicon-ok"></span>
+                    </button>
+                </span>
+                <img id="settings-gear" src="http://findicons.com/files/icons/772/token_light/128/gear.png" height="24" width="24" onclick="settingsClicked();"/>
+            </div>
+        </div>
+
+        <!-- Modal for setting image, sheet and field -->
+        <div class="modal" id="settingsModal">
+            <div class="modal-dialog modal-sm" role="dialog">
+                <div class="modal-content">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-sm-12">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-addon">Image</span>
+                                    <input id="image-url" title="Image URL" type="text" class="form-control" />
+                                </div>
+                                <br/>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-addon">Sheet</span>
+                                    <select id="sheet-name" class="form-control"></select>
+                                </div>
+                                <br/>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-addon">Field</span>
+                                    <select id="field-name" class="form-control"></select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" onclick="saveSettings();">Save changes</button>
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal for picking the field value after completing a shape -->
+        <div class="modal" id="fieldModal">
+            <div class="modal-dialog modal-sm" role="dialog">
+                <div class="modal-content">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-sm-12">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-addon">Value</span>
+                                    <select id="field-domain" class="form-control"></select>
+                                </div>
+                                <br/>
+                                <br/>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" onclick="saveShape();">Save </button>
+                        <button type="button" class="btn btn-secondary" onclick="discardShape();">Discard</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </body>
+</html>
