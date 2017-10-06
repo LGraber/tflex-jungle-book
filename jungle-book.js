@@ -1,3 +1,5 @@
+"use strict";
+
 var gFilterList;
 
 function getElem(elementId) {
@@ -34,17 +36,23 @@ function createTempPolyLine(x, y) {
 
 function applyShapeFilter(event){
     event.stopPropagation();
+    var shiftKey = event.shiftKey;
+    let updateType = shiftKey ? tableau.FilterUpdateType.Add : tableau.FilterUpdateType.Replace;
     var filterValue = event.currentTarget.getAttribute('title');
     const worksheetIndex = getElem('sheet-names').selectedIndex;
     tableau.addIn.dashboardContent.dashboard.worksheets[worksheetIndex].applyFilterAsync(
         getElem('filter-fields').value,
         [filterValue],
-        tableau.FilterUpdateType.Replace
+        updateType
     ).then( (fieldName) => {
-        // Let's apply css to the polygon to show it was selected
-        poly = getElem('svg-root').querySelector("polygon[title='" + filterValue + "']");
-        if (null != poly) {
-            poly.classList.add('active-filter');
+        // Let's apply css to the polygon to show it was selected. Unapply for anyone else
+        const polygons = getElem('svg-root').getElementsByTagNameNS("http://www.w3.org/2000/svg", 'polygon');
+        for (let i=0; i<polygons.length; ++i) {
+            if (polygons[i].getAttribute('title') == filterValue) {
+                polygons[i].classList.add('active-filter');
+            } else if (!shiftKey) {
+                polygons[i].classList.remove('active-filter');
+            }
         }
     }, (err) => {
         alert(" applyFilterAsync Failed: " + err.toString());
@@ -71,7 +79,7 @@ function saveShape(e) {
         createSavedPolygon(tempShape.getAttribute('points'), getElem('filter-domain').value, false);
         getElem('svg-root').removeChild(tempShape);
     }
-    getElem('svg-root').removeChild(getElem('shape-start'));
+    removeShape('shape-start');
     $('#field-modal').modal('hide');
 }
 
@@ -200,8 +208,7 @@ function clearFilters() {
     tableau.addIn.dashboardContent.dashboard.worksheets[worksheetIndex].applyFilterAsync(
         fieldName,
         [],
-        tableau.FilterUpdateType.Replace,
-        {'isExcludeMode': true}
+        tableau.FilterUpdateType.All
     ).then( (fieldName) => {
         // make sure nothing is marked as active
         const polygons = getElem('svg-root').getElementsByTagNameNS("http://www.w3.org/2000/svg", 'polygon');
@@ -267,6 +274,7 @@ function onBodyLoad() {
             const imageUrl = tableau.addIn.settings.get('imageUrl');
             if (null != imageUrl) {
                 getElem('mapped-image').src = imageUrl;
+                getElem('image-url').value = imageUrl;
             } else {
                 // We need the image so lets show the dialog. Also switch to edit mode
                 onGearClicked();
